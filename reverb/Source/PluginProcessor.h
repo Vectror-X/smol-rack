@@ -11,6 +11,7 @@
 #include <JuceHeader.h>
 
 #include "BossEmu.h"
+#include "RateConverter.h"
 
 //==============================================================================
 /**
@@ -24,6 +25,12 @@ public:
   float filterTempL = 0;
   float filterTempR = 0;
   juce::SpinLock emuLock;
+
+  // Settings read from RRV10.settings (see loadSettings)
+  bool useNativeRate = true;      // emulationRate: "native" runs the chip at nativeSampleRate, "host" at the host rate
+  double nativeSampleRate = 31250.0;
+  NativeRateRunner nativeRunner;
+  std::vector<float> chipInL, chipInR, chipOutL, chipOutR;
 
   juce::AudioParameterBool *enabled;
   juce::AudioParameterFloat *effectLevel;
@@ -73,6 +80,9 @@ public:
   void setStateInformation(const void *data, int sizeInBytes) override;
 
 private:
+  void loadSettings();
+  void processChip(const float *inL, const float *inR, float *outL, float *outR, int n);
+
   //==============================================================================
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ReverbAudioProcessor)
 };

@@ -10,6 +10,50 @@
 #include "PluginEditor.h"
 
 //==============================================================================
+// Settings file: RRV10/RRV10.settings in the user's application data folder (%APPDATA% on Windows,
+// ~/Library/Application Support on macOS), a JUCE <PROPERTIES> file with camelCase keys. It is created with
+// the defaults when missing, missing keys are added, and the values are read every time the host prepares
+// the plugin, so an edit takes effect the next time the plugin is loaded or the audio device is restarted.
+//
+//   emulationRate     "native" (default): the chip runs at nativeSampleRate, like the hardware, with the
+//                     host signal converted to that rate and back. Decay, pre-delay and tone are the same at
+//                     any host rate.
+//                     "host": the chip runs once per host sample, as in earlier versions of this plugin. The
+//                     reverb then gets shorter and brighter as the host rate rises (1.41x at 44.1 kHz,
+//                     3.07x at 96 kHz).
+//   nativeSampleRate  the chip rate in Hz for "native" mode. The RRV-10 runs at 31250 Hz (8 MHz crystal,
+//                     256 cycles per sample). Other values speed the reverb up or slow it down, like a
+//                     detuned crystal. Limited to 8000 - 96000.
+
+void ReverbAudioProcessor::loadSettings() {
+  juce::PropertiesFile::Options o;
+  o.applicationName = "RRV10";
+  o.folderName = "RRV10";
+  o.filenameSuffix = ".settings";
+  o.osxLibrarySubFolder = "Application Support";
+  o.storageFormat = juce::PropertiesFile::storeAsXML;
+  o.millisecondsBeforeSaving = -1; // only save when asked
+
+  juce::PropertiesFile settings(o);
+
+  bool changed = false;
+  if (!settings.containsKey("emulationRate")) {
+    settings.setValue("emulationRate", "native");
+    changed = true;
+  }
+  if (!settings.containsKey("nativeSampleRate")) {
+    settings.setValue("nativeSampleRate", 31250);
+    changed = true;
+  }
+  if (changed)
+    settings.saveIfNeeded();
+
+  useNativeRate =
+      settings.getValue("emulationRate", "native").trim().compareIgnoreCase("host") != 0;
+  nativeSampleRate =
+      juce::jlimit(8000.0, 96000.0, settings.getDoubleValue("nativeSampleRate", 31250.0));
+}
+
 ReverbAudioProcessor::ReverbAudioProcessor()
     : AudioProcessor(
           BusesProperties()
@@ -114,9 +158,40 @@ void ReverbAudioProcessor::changeProgramName(int index,
 //==============================================================================
 void ReverbAudioProcessor::prepareToPlay(double sampleRate,
                                          int samplesPerBlock) {
+  loadSettings();
+
+  const auto size = (size_t)juce::jmax(samplesPerBlock, 1);
+  chipInL.assign(size, 0.0f);
+  chipInR.assign(size, 0.0f);
+  chipOutL.assign(size, 0.0f);
+  chipOutR.assign(size, 0.0f);
+
   emuLock.enter();
   bossEmu.reset();
   bossEmu.setParameters(*mode, *decayTime, 7);
+  nativeRunner.prepare(sampleRate, nativeSampleRate);
+  emuLock.exit();
+}
+
+void ReverbAudioProcessor::processChip(const float *inL, const float *inR,
+                                       float *outL, float *outR, int n) {
+  constexpr float scaleFactor = 16383.0f;
+
+  auto chipSample = [this](float l, float r, float &ol, float &orr) {
+    short inLeft = (short)juce::jlimit(-32768.0f, 32767.0f, l * scaleFactor);
+    short inRight = (short)juce::jlimit(-32768.0f, 32767.0f, r * scaleFactor);
+    short outLeft, outRight;
+    bossEmu.process(&inLeft, &inRight, &outLeft, &outRight, 1);
+    ol = outLeft / scaleFactor;
+    orr = outRight / scaleFactor;
+  };
+
+  emuLock.enter();
+  if (useNativeRate)
+    nativeRunner.run(inL, inR, outL, outR, n, chipSample);
+  else
+    for (int i = 0; i < n; ++i)
+      chipSample(inL[i], inR[i], outL[i], outR[i]);
   emuLock.exit();
 }
 
@@ -162,10 +237,16 @@ void ReverbAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer,
   bool prev_isOverloading = isOverloading;
   isOverloading = false;
 
-  short inLeft = 0;
-  short inRight = 0;
-  short outLeft, outRight;
-  for (size_t i = 0; i < buffer.getNumSamples(); i++) {
+  const int numSamples = buffer.getNumSamples();
+  if ((size_t)numSamples > chipInL.size()) {
+    // the host sent a bigger block than announced
+    chipInL.resize((size_t)numSamples);
+    chipInR.resize((size_t)numSamples);
+    chipOutL.resize((size_t)numSamples);
+    chipOutR.resize((size_t)numSamples);
+  }
+
+  for (int i = 0; i < numSamples; i++) {
     float drySampleL = channelDataL[i];
     float drySampleR = channelDataR[i];
 
@@ -191,18 +272,17 @@ void ReverbAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer,
     filterTempL = filteredSampleL;
     filterTempR = filteredSampleR;
 
-    float scaleFactor = 16383.0f;
-    inLeft = filteredSampleL * scaleFactor;
-    inRight = filteredSampleR * scaleFactor;
-    emuLock.enter();
-    bossEmu.process(&inLeft, &inRight, &outLeft, &outRight, 1);
-    emuLock.exit();
+    chipInL[(size_t)i] = filteredSampleL;
+    chipInR[(size_t)i] = filteredSampleR;
+  }
 
-    float wetSampleL = outLeft / scaleFactor;
-    float wetSampleR = outRight / scaleFactor;
-    if (*enabled) {
-      channelDataL[i] = wetSampleL * *effectLevel + drySampleL * *directLevel;
-      channelDataR[i] = wetSampleR * *effectLevel + drySampleR * *directLevel;
+  processChip(chipInL.data(), chipInR.data(), chipOutL.data(), chipOutR.data(),
+              numSamples);
+
+  if (*enabled) {
+    for (int i = 0; i < numSamples; i++) {
+      channelDataL[i] = chipOutL[(size_t)i] * *effectLevel + channelDataL[i] * *directLevel;
+      channelDataR[i] = chipOutR[(size_t)i] * *effectLevel + channelDataR[i] * *directLevel;
     }
   }
 

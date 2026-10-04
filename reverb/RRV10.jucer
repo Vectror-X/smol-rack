@@ -8,6 +8,7 @@
     <GROUP id="{8E147910-B44C-87EF-2F8D-C5CE6375CED3}" name="Source">
       <FILE id="cjZeOD" name="KnobLF.h" compile="0" resource="0" file="Source/KnobLF.h"/>
       <FILE id="vGfaiH" name="BossEmu.h" compile="0" resource="0" file="Source/BossEmu.h"/>
+      <FILE id="rTcV31" name="RateConverter.h" compile="0" resource="0" file="Source/RateConverter.h"/>
       <FILE id="dB44uk" name="BossEmu.cpp" compile="1" resource="0" file="Source/BossEmu.cpp"/>
       <FILE id="wGwCwl" name="rrv10.bin" compile="0" resource="1" file="rrv10.bin"/>
       <FILE id="sYR5cv" name="PluginProcessor.cpp" compile="1" resource="0"
