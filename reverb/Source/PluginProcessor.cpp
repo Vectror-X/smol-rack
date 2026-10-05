@@ -36,12 +36,26 @@ void ReverbAudioProcessor::loadSettings() {
 
   juce::PropertiesFile settings(o);
 
+  // Key names are matched loosely: case, '_', '-' and spaces are ignored, so emulationRate,
+  // emulation_rate, emulation-rate, EmulationRate and EMULATION_RATE all mean the same key.
+  const auto keyFor = [&settings](const juce::String &camelName) -> juce::String {
+    const auto normalise = [](const juce::String &s) {
+      return s.removeCharacters("_- ").toLowerCase();
+    };
+    const auto wanted = normalise(camelName);
+    const auto keys = settings.getAllProperties().getAllKeys();
+    for (const auto &k : keys)
+      if (normalise(k) == wanted)
+        return k;
+    return {};
+  };
+
   bool changed = false;
-  if (!settings.containsKey("emulationRate")) {
+  if (keyFor("emulationRate").isEmpty()) {
     settings.setValue("emulationRate", "native");
     changed = true;
   }
-  if (!settings.containsKey("nativeSampleRate")) {
+  if (keyFor("nativeSampleRate").isEmpty()) {
     settings.setValue("nativeSampleRate", 31250);
     changed = true;
   }
@@ -49,9 +63,9 @@ void ReverbAudioProcessor::loadSettings() {
     settings.saveIfNeeded();
 
   useNativeRate =
-      settings.getValue("emulationRate", "native").trim().compareIgnoreCase("host") != 0;
-  nativeSampleRate =
-      juce::jlimit(8000.0, 96000.0, settings.getDoubleValue("nativeSampleRate", 31250.0));
+      settings.getValue(keyFor("emulationRate"), "native").trim().compareIgnoreCase("host") != 0;
+  nativeSampleRate = juce::jlimit(
+      8000.0, 96000.0, settings.getDoubleValue(keyFor("nativeSampleRate"), 31250.0));
 }
 
 ReverbAudioProcessor::ReverbAudioProcessor()
