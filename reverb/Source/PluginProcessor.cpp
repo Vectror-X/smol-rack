@@ -175,7 +175,7 @@ void ReverbAudioProcessor::prepareToPlay(double sampleRate,
 
 void ReverbAudioProcessor::processChip(const float *inL, const float *inR,
                                        float *outL, float *outR, int n) {
-  constexpr float scaleFactor = 16383.0f;
+  static constexpr float scaleFactor = 16383.0f;
 
   auto chipSample = [this](float l, float r, float &ol, float &orr) {
     short inLeft = (short)juce::jlimit(-32768.0f, 32767.0f, l * scaleFactor);
