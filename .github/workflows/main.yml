@@ -1,9 +1,10 @@
 # Based on https://github.com/OwlPlug/owlplug-scanner/blob/master/.github/workflows/main.yml
+# This fork builds the Windows VST3 only: one runner per push.
 name: RRV10
 
-on: 
+on:
   push:
-    branches: 
+    branches:
       - '**'
 
 jobs:
@@ -28,92 +29,6 @@ jobs:
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: RRV10-win
-        path: |
-              ./reverb/Builds/VisualStudio2022/x64/Release/VST3/RRV10.vst3
-              ./reverb/Builds/VisualStudio2022/x64/Release/Standalone Plugin/RRV10.exe
-  build-osx:
-    runs-on: macos-13
-    steps:
-    - uses: actions/checkout@v3.3.0
-      with:
-        fetch-depth: 0
-        submodules: recursive
-    - name: "Download Projucer"
-      run: |
-           cd reverb
-           git clone -b 8.0.7 --depth 1 https://github.com/juce-framework/JUCE JUCE
-           bash -ex ./build/download-projucer.sh
-      shell: bash
-      env:
-        OS: osx
-    - name: "Build macOS"
-      run: sh -ex ./reverb/build/build-osx.sh
-      shell: bash
-    - name: "zip macOS"
-      run: |
-           cd ./reverb/Builds/MacOSX/build/Release/
-           zip -r RRV10.vst3.macOS.zip RRV10.vst3
-           zip -r RRV10.component.macOS.zip RRV10.component
-           zip -r RRV10.app.macOS.zip RRV10.app
-           cd -
-      shell: bash
-    - name: Upload Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: RRV10-osx
-        path: |
-              ./reverb/Builds/MacOSX/build/Release/RRV10.vst3.macOS.zip
-              ./reverb/Builds/MacOSX/build/Release/RRV10.component.macOS.zip
-              ./reverb/Builds/MacOSX/build/Release/RRV10.app.macOS.zip
-  build-linux:
-    runs-on: "ubuntu-latest"
-    steps:
-    - uses: actions/checkout@v3.3.0
-      with:
-        fetch-depth: 0
-        submodules: recursive
-    - name: "Download Projucer"
-      run: |
-           cd reverb
-           git clone -b 7.0.5 --depth 1 https://github.com/juce-framework/JUCE JUCE
-           bash -ex ./build/download-projucer.sh
-      shell: bash
-      env:
-        OS: linux
-    - name : Update packages
-      run: sudo apt update
-    - name : Install Juce dev dependencies
-      run: sudo apt install libasound2-dev libjack-jackd2-dev ladspa-sdk libcurl4-openssl-dev libfreetype6-dev libx11-dev libxcomposite-dev libxcursor-dev libxcursor-dev libxext-dev libxinerama-dev libxrandr-dev libxrender-dev libwebkit2gtk-4.1-dev libglu1-mesa-dev mesa-common-dev xmlstarlet
-    - name: "Build Linux"
-      run: sh -ex ./reverb/build/build-linux.sh
-      shell: bash
-    - name: Upload Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: RRV10-linux
-        path: |
-              ./reverb/Builds/LinuxMakefile/build/RRV10.vst3
-              ./reverb/Builds/LinuxMakefile/build/RRV10
-  release:
-    name: "Release"
-    needs: [build-win, build-osx, build-linux]
-    if: github.ref == 'refs/heads/main'
-    runs-on: "ubuntu-latest"
-    steps:
-      - uses: actions/checkout@v3.3.0
-      - name: Retrieve artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: reverb/build
-          pattern: RRV10-*
-          merge-multiple: true
-      - run: ls -R reverb/build
-      - uses: "marvinpinto/action-automatic-releases@latest"
-        with:
-          repo_token: "${{ secrets.GITHUB_TOKEN }}"
-          prerelease: true
-          automatic_release_tag: latest
-          title: RRV10 Latest
-          files: |
-            reverb/build/**/*
+        name: RRV10-win-vst3
+        path: ./reverb/Builds/VisualStudio2022/x64/Release/VST3/RRV10.vst3
+        if-no-files-found: error
