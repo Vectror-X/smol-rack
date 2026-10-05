@@ -12,7 +12,7 @@
 //==============================================================================
 // Settings file: RRV10/RRV10.settings in the user's application data folder (%APPDATA% on Windows,
 // ~/Library/Application Support on macOS), a JUCE <PROPERTIES> file. It is created with the defaults when
-// missing and missing keys are added; the user's values are never overwritten.
+// missing, with emulationRate and nativeSampleRate; the user's values are never overwritten.
 //
 // Key names are matched loosely: case, '_', '-' and spaces are ignored, so emulationRate, emulation_rate,
 // emulation-rate, EmulationRate and EMULATION_RATE all mean the same key.
@@ -29,8 +29,9 @@
 //                     256 cycles per sample). Other values speed the reverb up or slow it down, like a
 //                     detuned crystal. Limited to 8000 - 96000.
 //
-// Starting values of the knobs, applied when a new instance is created. A project or preset that is loaded
-// afterwards keeps its own values.
+// Optional starting values of the knobs. They are not written to the file; add only the ones you want.
+// They are applied when a new instance is created, and a project or preset loaded afterwards keeps its own
+// values. A key that is not in the file leaves that knob at its factory value.
 //   mode              0 - 8
 //   decayTime         0 - 15 (the chip uses the whole number)
 //   preEq             0 - 1 (0.5 is flat, lower is darker, higher is brighter)
@@ -84,12 +85,6 @@ void ReverbAudioProcessor::loadSettings() {
   bool changed = false;
   addIfMissing(settings, "emulationRate", "native", changed);
   addIfMissing(settings, "nativeSampleRate", 31250, changed);
-  addIfMissing(settings, "mode", 0, changed);
-  addIfMissing(settings, "decayTime", 5, changed);
-  addIfMissing(settings, "preEq", 0.5, changed);
-  addIfMissing(settings, "effectLevel", 0.4, changed);
-  addIfMissing(settings, "directLevel", 1.0, changed);
-  addIfMissing(settings, "enabled", 1, changed);
   if (changed)
     settings.saveIfNeeded();
 
