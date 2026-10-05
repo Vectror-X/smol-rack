@@ -11,10 +11,14 @@
 
 //==============================================================================
 // Settings file: RRV10/RRV10.settings in the user's application data folder (%APPDATA% on Windows,
-// ~/Library/Application Support on macOS), a JUCE <PROPERTIES> file with camelCase keys. It is created with
-// the defaults when missing, missing keys are added, and the values are read every time the host prepares
-// the plugin, so an edit takes effect the next time the plugin is loaded or the audio device is restarted.
+// ~/Library/Application Support on macOS), a JUCE <PROPERTIES> file. It is created with the defaults when
+// missing and missing keys are added; the user's values are never overwritten.
 //
+// Key names are matched loosely: case, '_', '-' and spaces are ignored, so emulationRate, emulation_rate,
+// emulation-rate, EmulationRate and EMULATION_RATE all mean the same key.
+//
+// Read every time the host prepares the plugin (an edit takes effect the next time the plugin is loaded or
+// the audio device is restarted):
 //   emulationRate     "native" (default): the chip runs at nativeSampleRate, like the hardware, with the
 //                     host signal converted to that rate and back. Decay, pre-delay and tone are the same at
 //                     any host rate.
@@ -24,8 +28,18 @@
 //   nativeSampleRate  the chip rate in Hz for "native" mode. The RRV-10 runs at 31250 Hz (8 MHz crystal,
 //                     256 cycles per sample). Other values speed the reverb up or slow it down, like a
 //                     detuned crystal. Limited to 8000 - 96000.
+//
+// Starting values of the knobs, applied when a new instance is created. A project or preset that is loaded
+// afterwards keeps its own values.
+//   mode              0 - 8
+//   decayTime         0 - 15 (the chip uses the whole number)
+//   preEq             0 - 1 (0.5 is flat, lower is darker, higher is brighter)
+//   effectLevel       0 - 1
+//   directLevel       0 - 1
+//   enabled           1 / 0 (also true / false, on / off)
 
-void ReverbAudioProcessor::loadSettings() {
+namespace {
+juce::PropertiesFile::Options settingsOptions() {
   juce::PropertiesFile::Options o;
   o.applicationName = "RRV10";
   o.folderName = "RRV10";
@@ -33,39 +47,81 @@ void ReverbAudioProcessor::loadSettings() {
   o.osxLibrarySubFolder = "Application Support";
   o.storageFormat = juce::PropertiesFile::storeAsXML;
   o.millisecondsBeforeSaving = -1; // only save when asked
+  return o;
+}
 
-  juce::PropertiesFile settings(o);
+juce::String normaliseKey(const juce::String &s) {
+  return s.removeCharacters("_- ").toLowerCase();
+}
 
-  // Key names are matched loosely: case, '_', '-' and spaces are ignored, so emulationRate,
-  // emulation_rate, emulation-rate, EmulationRate and EMULATION_RATE all mean the same key.
-  const auto keyFor = [&settings](const juce::String &camelName) -> juce::String {
-    const auto normalise = [](const juce::String &s) {
-      return s.removeCharacters("_- ").toLowerCase();
-    };
-    const auto wanted = normalise(camelName);
-    const auto keys = settings.getAllProperties().getAllKeys();
-    for (const auto &k : keys)
-      if (normalise(k) == wanted)
-        return k;
-    return {};
-  };
+// The key as it is spelled in the file, or an empty string when the file does not have it.
+juce::String findKey(juce::PropertiesFile &settings, const juce::String &camelName) {
+  const auto wanted = normaliseKey(camelName);
+  const auto keys = settings.getAllProperties().getAllKeys();
+  for (const auto &k : keys)
+    if (normaliseKey(k) == wanted)
+      return k;
+  return {};
+}
+
+juce::String readKey(juce::PropertiesFile &settings, const juce::String &camelName) {
+  const auto key = findKey(settings, camelName);
+  return key.isEmpty() ? juce::String() : settings.getValue(key).trim();
+}
+
+void addIfMissing(juce::PropertiesFile &settings, const juce::String &camelName, const juce::var &value,
+                  bool &changed) {
+  if (findKey(settings, camelName).isEmpty()) {
+    settings.setValue(camelName, value);
+    changed = true;
+  }
+}
+} // namespace
+
+void ReverbAudioProcessor::loadSettings() {
+  juce::PropertiesFile settings(settingsOptions());
 
   bool changed = false;
-  if (keyFor("emulationRate").isEmpty()) {
-    settings.setValue("emulationRate", "native");
-    changed = true;
-  }
-  if (keyFor("nativeSampleRate").isEmpty()) {
-    settings.setValue("nativeSampleRate", 31250);
-    changed = true;
-  }
+  addIfMissing(settings, "emulationRate", "native", changed);
+  addIfMissing(settings, "nativeSampleRate", 31250, changed);
+  addIfMissing(settings, "mode", 0, changed);
+  addIfMissing(settings, "decayTime", 5, changed);
+  addIfMissing(settings, "preEq", 0.5, changed);
+  addIfMissing(settings, "effectLevel", 0.4, changed);
+  addIfMissing(settings, "directLevel", 1.0, changed);
+  addIfMissing(settings, "enabled", 1, changed);
   if (changed)
     settings.saveIfNeeded();
 
-  useNativeRate =
-      settings.getValue(keyFor("emulationRate"), "native").trim().compareIgnoreCase("host") != 0;
-  nativeSampleRate = juce::jlimit(
-      8000.0, 96000.0, settings.getDoubleValue(keyFor("nativeSampleRate"), 31250.0));
+  const auto rate = readKey(settings, "emulationRate");
+  useNativeRate = rate.compareIgnoreCase("host") != 0;
+  const auto nativeRate = readKey(settings, "nativeSampleRate");
+  nativeSampleRate =
+      juce::jlimit(8000.0, 96000.0, nativeRate.isEmpty() ? 31250.0 : nativeRate.getDoubleValue());
+}
+
+void ReverbAudioProcessor::applyStartingValues() {
+  juce::PropertiesFile settings(settingsOptions());
+
+  auto v = readKey(settings, "mode");
+  if (v.isNotEmpty())
+    *mode = juce::jlimit(0, 8, v.getIntValue());
+  v = readKey(settings, "decayTime");
+  if (v.isNotEmpty())
+    *decayTime = (float)juce::jlimit(0.0, 15.0, v.getDoubleValue());
+  v = readKey(settings, "preEq");
+  if (v.isNotEmpty())
+    *preEq = (float)juce::jlimit(0.0, 1.0, v.getDoubleValue());
+  v = readKey(settings, "effectLevel");
+  if (v.isNotEmpty())
+    *effectLevel = (float)juce::jlimit(0.0, 1.0, v.getDoubleValue());
+  v = readKey(settings, "directLevel");
+  if (v.isNotEmpty())
+    *directLevel = (float)juce::jlimit(0.0, 1.0, v.getDoubleValue());
+  v = readKey(settings, "enabled");
+  if (v.isNotEmpty())
+    *enabled = !(v == "0" || v.equalsIgnoreCase("false") || v.equalsIgnoreCase("off") ||
+                 v.equalsIgnoreCase("no"));
 }
 
 ReverbAudioProcessor::ReverbAudioProcessor()
@@ -110,6 +166,10 @@ ReverbAudioProcessor::ReverbAudioProcessor()
                    0.0f,                    // minimum value
                    1.0f,                    // maximum value
                    0.5f));                  // default value
+
+  // create the settings file if needed, then start from the knob values it holds
+  loadSettings();
+  applyStartingValues();
 
   enabled->addListener(this);
   effectLevel->addListener(this);

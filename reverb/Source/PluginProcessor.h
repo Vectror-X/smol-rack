@@ -81,6 +81,7 @@ public:
 
 private:
   void loadSettings();
+  void applyStartingValues();
   void processChip(const float *inL, const float *inR, float *outL, float *outR, int n);
 
   //==============================================================================
